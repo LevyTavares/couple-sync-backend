@@ -1,7 +1,11 @@
 // api/cloudinaryConfig.js
-
-const cloudinary = require('cloudinary').v2;
-const multer = require('multer');
+/**
+ * Configuração do Cloudinary e Multer (memoryStorage).
+ * - Evita escrita em disco (compatível com plataformas serverless).
+ * - Exporta `cloudinary` e `uploadMiddleware` para uso nas rotas.
+ */
+const cloudinary = require("cloudinary").v2;
+const multer = require("multer");
 
 // 1. Configura o SDK do Cloudinary com as chaves do .env
 cloudinary.config({

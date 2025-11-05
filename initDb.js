@@ -1,6 +1,9 @@
 // api/initDb.js
-
-const { query } = require('./db'); // Importa nosso módulo de BD
+/**
+ * Script de inicialização do banco: cria/garante tabelas `fotos` e `usuarios`.
+ * Execute uma vez ao iniciar o projeto ou como parte do boot.
+ */
+const { query } = require("./db"); // Importa nosso módulo de BD
 
 async function setupDatabase() {
   // Comando SQL para criar a tabela "fotos" (já tínhamos)
@@ -32,9 +35,8 @@ async function setupDatabase() {
     // Executa o segundo comando
     await query(createUsuariosTableQuery);
     console.log('✅ Tabela "usuarios" verificada/criada com sucesso!');
-
   } catch (err) {
-    console.error('❌ Erro ao configurar o banco de dados:', err.stack);
+    console.error("❌ Erro ao configurar o banco de dados:", err.stack);
   }
 }
 
