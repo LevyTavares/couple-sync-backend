@@ -1,0 +1,148 @@
+openapi: 3.1.0
+info:
+  title: Couple Sync API
+  version: 1.0.0
+  description: API para autenticação e gestão de fotos (Cloudinary + PostgreSQL)
+servers:
+  - url: http://localhost:4000/api
+    description: Desenvolvimento local
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 6 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    LoginResponse:
+      type: object
+      properties:
+        message: { type: string }
+        token: { type: string }
+        user:
+          type: object
+          properties:
+            id: { type: integer }
+            email: { type: string, format: email }
+    Foto:
+      type: object
+      properties:
+        id: { type: integer }
+        created_at: { type: string, format: date-time }
+        image_url: { type: string, format: uri }
+        description: { type: string }
+        photo_date: { type: string, format: date }
+    UpdateFotoRequest:
+      type: object
+      required: [description, photoDate]
+      properties:
+        description: { type: string }
+        photoDate: { type: string, format: date }
+paths:
+  /register:
+    post:
+      summary: Registrar um novo usuário
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201": { description: Usuário criado }
+        "400": { description: Email já existe ou inválido }
+  /login:
+    post:
+      summary: Autenticar e obter token JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Token retornado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { description: Credenciais inválidas }
+  /fotos:
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: Listar fotos
+      responses:
+        "200":
+          description: Lista de fotos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Foto" }
+        "401": { description: Não autorizado }
+  /upload:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Enviar nova foto
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [imageFile, description, photoDate]
+              properties:
+                imageFile:
+                  type: string
+                  format: binary
+                description:
+                  type: string
+                photoDate:
+                  type: string
+                  format: date
+      responses:
+        "201":
+          description: Foto criada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Foto" }
+        "401": { description: Não autorizado }
+  /fotos/{id}:
+    put:
+      security: [{ bearerAuth: [] }]
+      summary: Atualizar descrição/data de uma foto
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateFotoRequest" }
+      responses:
+        "200": { description: Foto atualizada }
+        "404": { description: Foto não encontrada }
+        "401": { description: Não autorizado }
+    delete:
+      security: [{ bearerAuth: [] }]
+      summary: Remover uma foto
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: Foto removida }
+        "404": { description: Foto não encontrada }
+        "401": { description: Não autorizado }

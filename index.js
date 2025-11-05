@@ -19,6 +19,11 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const authMiddleware = require("./authMiddleware"); // O NOSSO "SEGURANÇA"
 
+const path = require("path");
+// Swagger UI
+const swaggerUi = require("swagger-ui-express");
+const YAML = require("yamljs");
+
 // 3. Inicializa o App Express
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -27,6 +32,24 @@ const PORT = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// 4.1. Rota de saúde (útil para health checks)
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok", uptime: process.uptime() });
+});
+
+// 4.2. Documentação da API (Swagger UI)
+try {
+  const swaggerPath = path.join(__dirname, "openapi.yml");
+  const swaggerDocument = YAML.load(swaggerPath);
+  app.use(
+    "/api/docs",
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerDocument, { explorer: true })
+  );
+} catch (e) {
+  console.warn("Swagger não foi carregado:", e?.message);
+}
 
 // --- 🔒 ROTAS DE AUTENTICAÇÃO 🔒 ---
 // (Estas rotas NÃO SÃO protegidas, pois são para criar/obter o token)
