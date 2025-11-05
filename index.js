@@ -7,9 +7,10 @@ require('dotenv').config();
 const db = require('./db');
 const { cloudinary, uploadMiddleware } = require('./cloudinaryConfig');
 
-// 👇 2. NOVAS IMPORTAÇÕES DE SEGURANÇA 👇
+// 2. IMPORTAÇÕES DE SEGURANÇA
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const authMiddleware = require('./authMiddleware'); // O NOSSO "SEGURANÇA"
 
 // 3. Inicializa o App Express
 const app = express();
@@ -21,18 +22,17 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // --- 🔒 ROTAS DE AUTENTICAÇÃO 🔒 ---
+// (Estas rotas NÃO SÃO protegidas, pois são para criar/obter o token)
 
-// 👇 5. NOVO: Rota de Registro (POST /api/register) 👇
+// Rota de Registro (POST /api/register)
 app.post('/api/register', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validação simples
     if (!email || !password) {
       return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
     }
 
-    // Verifica se o usuário já existe
     const { rows: userExists } = await db.query(
       'SELECT * FROM usuarios WHERE email = $1',
       [email]
@@ -41,11 +41,9 @@ app.post('/api/register', async (req, res) => {
       return res.status(400).json({ error: 'Este email já está em uso.' });
     }
 
-    // Criptografa a senha (Hashing)
-    const salt = await bcrypt.genSalt(10); // Gera o "sal"
-    const passwordHash = await bcrypt.hash(password, salt); // Cria o hash
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
 
-    // Salva o novo usuário no banco de dados
     const { rows: newUser } = await db.query(
       'INSERT INTO usuarios (email, password_hash) VALUES ($1, $2) RETURNING id, email, created_at',
       [email, passwordHash]
@@ -60,51 +58,40 @@ app.post('/api/register', async (req, res) => {
 });
 
 
-// 👇 6. NOVO: Rota de Login (POST /api/login) 👇
+// Rota de Login (POST /api/login)
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validação
     if (!email || !password) {
       return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
     }
 
-    // Procura o usuário pelo email
     const { rows: userRows } = await db.query(
       'SELECT * FROM usuarios WHERE email = $1',
       [email]
     );
     
-    // Se o usuário não for encontrado
     if (userRows.length === 0) {
-      return res.status(401).json({ error: 'Email ou senha inválidos.' }); // 401 = Não autorizado
+      return res.status(401).json({ error: 'Email ou senha inválidos.' });
     }
     
     const user = userRows[0];
-
-    // Compara a senha enviada com o hash salvo no banco
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
-    // Se as senhas não baterem
     if (!isMatch) {
       return res.status(401).json({ error: 'Email ou senha inválidos.' });
     }
 
-    // 7. SUCESSO! Cria o Token (JWT)
-    // O "payload" é a informação que guardamos dentro do token
     const payload = {
       userId: user.id,
       email: user.email,
     };
 
-    // Assina o token com nosso segredo do .env
-    // Ele expira em 7 dias ("7d")
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn: '7d',
     });
 
-    // Envia o token de volta para o frontend
     res.status(200).json({
       message: 'Login bem-sucedido!',
       token: token,
@@ -122,12 +109,109 @@ app.post('/api/login', async (req, res) => {
 
 
 // --- 📸 ROTAS DAS FOTOS (CRUD) 📸 ---
-// (Estas rotas permanecem exatamente como estavam)
+// (Estas rotas AGORA ESTÃO PROTEGIDAS pelo authMiddleware)
 
-app.get('/api/fotos', async (req, res) => { /* ...código... */ });
-app.post('/api/upload', uploadMiddleware.single('imageFile'), async (req, res) => { /* ...código... */ });
-app.put('/api/fotos/:id', async (req, res) => { /* ...código... */ });
-app.delete('/api/fotos/:id', async (req, res) => { /* ...código... */ });
+app.get('/api/fotos', authMiddleware, async (req, res) => {
+  try {
+    // O authMiddleware já verificou o usuário
+    const { rows } = await db.query(
+      'SELECT * FROM fotos ORDER BY created_at DESC'
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Erro ao buscar fotos:', err.stack);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+app.post('/api/upload', authMiddleware, uploadMiddleware.single('imageFile'), async (req, res) => {
+  try {
+    const { description, photoDate } = req.body;
+    const fileBuffer = req.file.buffer;
+
+    const uploadResult = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: "couple-sync-gallery" },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve(result);
+        }
+      );
+      stream.end(fileBuffer);
+    });
+
+    const imageUrl = uploadResult.secure_url;
+
+    const { rows } = await db.query(
+      `INSERT INTO fotos (image_url, description, photo_date) 
+       VALUES ($1, $2, $3) 
+       RETURNING *`,
+      [imageUrl, description, photoDate]
+    );
+
+    res.status(201).json(rows[0]);
+
+  } catch (err) {
+    console.error('Erro no upload:', err.stack);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+app.put('/api/fotos/:id', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { description, photoDate } = req.body;
+
+    if (!description || !photoDate) {
+      return res.status(400).json({ error: 'Descrição e data são obrigatórias.' });
+    }
+
+    const { rows } = await db.query(
+      `UPDATE fotos 
+       SET description = $1, photo_date = $2 
+       WHERE id = $3 
+       RETURNING *`,
+      [description, photoDate, id]
+    );
+
+    if (!rows[0]) {
+      return res.status(404).json({ error: 'Foto não encontrada.' });
+    }
+
+    res.status(200).json(rows[0]);
+
+  } catch (err) {
+    console.error('Erro ao atualizar foto:', err.stack);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+app.delete('/api/fotos/:id', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { rows: fotoRows } = await db.query(
+      'SELECT image_url FROM fotos WHERE id = $1',
+      [id]
+    );
+
+    if (fotoRows.length > 0) {
+      const imageUrl = fotoRows[0].image_url;
+      const urlSegments = imageUrl.split('/');
+      const publicIdWithExtension = urlSegments.slice(-2).join('/');
+      const publicId = publicIdWithExtension.substring(0, publicIdWithExtension.lastIndexOf('.'));
+      
+      await cloudinary.uploader.destroy(publicId);
+    }
+
+    await db.query('DELETE FROM fotos WHERE id = $1', [id]);
+    res.status(200).json({ message: 'Foto apagada com sucesso' }); 
+
+  } catch (err) {
+    console.error('Erro ao apagar foto:', err.stack);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
 
 
 // --- Inicia o Servidor ---
