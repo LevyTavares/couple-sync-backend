@@ -1,12 +1,12 @@
 # Couple Sync — Backend (Node.js/Express)
 
-API para autenticação e gestão de fotos com armazenamento de imagens no Cloudinary e PostgreSQL.
+API REST responsável por autenticação, upload e gestão de memórias. Usa PostgreSQL (Neon) para metadados e Cloudinary para armazenar imagens.
 
 ## Requisitos
 
 - Node.js 18+
-- Banco PostgreSQL (DATABASE_URL)
-- Conta no Cloudinary
+- PostgreSQL (Neon recomendado) — URL única com SSL
+- Conta no Cloudinary para armazenar as imagens
 
 ## Variáveis de ambiente
 
@@ -37,37 +37,58 @@ npm start    # inicia em produção
 
 ## Inicialização do banco
 
-O script `initDb.js` cria/garante as tabelas necessárias.
-Ele é importado na primeira execução do projeto (ou execute manualmente):
+O script `initDb.js` cria/garante as tabelas necessárias. Ele é importado na primeira execução (verificar em `index.js`) ou execute manualmente:
 
 ```bash
 node initDb.js
 ```
 
-Tabelas criadas:
+Estrutura simplificada:
 
-- `usuarios (id, created_at, email, password_hash)`
-- `fotos (id, created_at, image_url, description, photo_date)`
+- `usuarios`: id, created_at, email (único), password_hash (bcrypt)
+- `fotos`: id, created_at, image_url (CDN Cloudinary), description, photo_date
 
 ## Endpoints (prefixo /api)
 
-- POST `/register` → { email, password } → cria usuário
-- POST `/login` → { email, password } → retorna { token, user }
-- GET `/fotos` (auth) → lista fotos
-- POST `/upload` (auth, multipart: imageFile, description, photoDate) → cria foto e envia ao Cloudinary
-- PUT `/fotos/:id` (auth) → { description, photoDate }
-- DELETE `/fotos/:id` (auth) → remove do banco e da Cloudinary
+| Método | Rota       | Auth | Descrição                                                         |
+| ------ | ---------- | ---- | ----------------------------------------------------------------- |
+| POST   | /register  | -    | Cria usuário (hash bcrypt)                                        |
+| POST   | /login     | -    | Retorna JWT + dados do usuário                                    |
+| GET    | /fotos     | ✔    | Lista fotos do usuário autenticado                                |
+| POST   | /upload    | ✔    | Upload multipart (imageFile, description, photoDate) + Cloudinary |
+| PUT    | /fotos/:id | ✔    | Atualiza descrição / data da foto                                 |
+| DELETE | /fotos/:id | ✔    | Remove registro e a imagem no Cloudinary                          |
 
 Use o header: `Authorization: Bearer <token>`.
 
 ## Stack
 
 - Express, CORS, dotenv
-- Multer (memoryStorage) + Cloudinary
-- BCrypt + JWT para autenticação
-- pg (Pool) com `DATABASE_URL`
+- Multer (memoryStorage) + Cloudinary SDK
+- Bcrypt + JWT (assinatura simples HS256)
+- pg (Pool) usando `DATABASE_URL`
 
-## Notas
+## Fluxo de Upload (detalhado)
 
-- `ssl.rejectUnauthorized=false` no `db.js` facilita conexões com provedores como o Neon.
-- Ao deletar fotos, a API tenta remover a imagem correspondente no Cloudinary.
+1. Cliente envia multipart (imageFile, description, photoDate) com cabeçalho Authorization.
+2. Middleware valida JWT e extrai user id.
+3. Multer coloca o binário em memória → Cloudinary recebe stream/arquivo.
+4. URL pública retornada pelo Cloudinary é gravada na tabela `fotos`.
+5. Resposta JSON com metadados completos para render imediato no frontend.
+
+## Segurança e considerações
+
+- JWT simples (sem refresh) adequado para MVP acadêmico; em produção usar expiração curta + refresh tokens.
+- Upload limitado ao formato suportado pelo Cloudinary (config padrão aceita JPEG/PNG).
+- Remoção: tentativa de deletar a imagem no Cloudinary antes de remover do banco evita órfãos.
+- `ssl: { rejectUnauthorized: false }` usado porque alguns provedores serverless (Neon) exigem ajustes para conexões locais.
+
+## Documentação da API
+
+OpenAPI parcial em `openapi.yml`; pode ser servido via Swagger UI em `/api/docs`.
+
+## Erros comuns
+
+- 401 ao acessar `/fotos` → token ausente ou inválido.
+- 500 no upload → chaves do Cloudinary incorretas ou problema de rede.
+- Erro de conexão Postgres → revisar `DATABASE_URL` e permissões.
